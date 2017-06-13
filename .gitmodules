@@ -1,0 +1,9 @@
+[submodule "src/lib/libwebrtc"]
+	path = src/lib/libwebrtc
+	url = https://github.com/aisouard/libwebrtc.git
+[submodule "src/lib/rawrtc"]
+	path = src/lib/rawrtc
+	url = https://github.com/rawrtc/rawrtc
+[submodule "src/lib/rew"]
+	path = src/lib/rew
+	url = https://github.com/alfredh/rew
