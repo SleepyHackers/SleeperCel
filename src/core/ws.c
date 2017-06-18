@@ -1,17 +1,25 @@
-
+#include <pthread.h>
+#include <libwebsockets.h>
+#include <stdio.h>
+#include <string.h>
 
 #include "ws.h"
-#include <pthread.h>
 
-volatile int force_close = 0;
+
+volatile int force_exit = 0;
 struct lws_context *context;
 
 #if defined(LWS_OPENSSL_SUPPORT) && defined(LWS_HAVE_SSL_CTX_set1_param)
 char crl_path[1024] = "";
 #endif
 
+#define LOCAL_RESOURCE_PATH "libwebsockets-test-server"
+char *resource_path = LOCAL_RESOURCE_PATH;
+
 /* mutex for locking threads that touch the websockets list */
 pthread_mutex_t ws_mutex;
+
+int debug_level = 7;
 
 /* Lock websocket threads */
 void ws_lock(int iCare)
@@ -45,13 +53,47 @@ void ws_unlock(int iCare)
 enum ws_protocols {
 	/* always first */
 	PROTOCOL_HTTP = 0,
-
-	PROTOCOL_DUMB_INCREMENT,
-	PROTOCOL_LWS_MIRROR,
+	PROTOCOL_CHAT,
 
 	/* always last */
 	DEMO_PROTOCOL_COUNT
 };
+
+struct per_session_data__http {
+	lws_fop_fd_t fop_fd;
+
+  	unsigned int client_finished:1;
+
+
+	struct lws_spa *spa;
+	char result[500 + LWS_PRE];
+	int result_len;
+
+	char filename[256];
+	long file_length;
+	lws_filefd_type post_fd;
+};
+
+struct per_session_data__chat {
+	struct per_session_data__chat *list;
+	struct timeval tv_established;
+	int last;
+	char ip[270];
+	char user_agent[512];
+	const char *pos;
+	int len;
+};
+
+
+int callback_http(struct lws *wsi, enum lws_callback_reasons reason, void *user,
+		  void *in, size_t len)
+{
+}
+
+int callback_chat(struct lws *wsi, enum lws_callback_reasons reason, void *user,
+		  void *in, size_t len)
+{
+}
 
 /* list of supported protocols and callbacks */
 
@@ -65,37 +107,14 @@ static struct lws_protocols protocols[] = {
 		0,			/* max frame size / rx buffer */
 	},
 	{
-		"dumb-increment-protocol",
-		callback_dumb_increment,
-		sizeof(struct per_session_data__dumb_increment),
-		10,
-	},
-	{
-		"lws-mirror-protocol",
-		callback_lws_mirror,
-		sizeof(struct per_session_data__lws_mirror),
+		"chat",
+		callback_chat,
+		sizeof(struct per_session_data__chat),
 		128,
 	},
 	{ NULL, NULL, 0, 0 } /* terminator */
 };
 
-void *thread_dumb_increment(void *threadid)
-{
-	while (!force_close) {
-		/*
-		 * this lock means wsi in the active list cannot
-		 * disappear underneath us, because the code to add and remove
-		 * them is protected by the same lock
-		 */
-		pthread_mutex_lock(&ws_mutex);
-		lws_callback_on_writable_all_protocol(context,
-				&protocols[PROTOCOL_DUMB_INCREMENT]);
-		pthread_mutex_unlock(&ws_mutex);
-		usleep(100000);
-	}
-
-	pthread_exit(NULL);
-}
 
 void *thread_service(void *threadid)
 {
@@ -107,7 +126,7 @@ void *thread_service(void *threadid)
 
 void sighandler(int sig)
 {
-	force_close = 1;
+	force_exit = 1;
 	lws_cancel_service(context);
 }
 
@@ -125,7 +144,11 @@ static const struct lws_extension exts[] = {
 	{ NULL, NULL, NULL /* terminator */ }
 };
 
-int main(int argc, char **argv)
+int init_websockets(MAIN_CONFIG *config)
+{
+}
+
+int amain(int argc, char **argv)
 {
 	struct lws_context_creation_info info;
 	char interface_name[128] = "";
@@ -147,52 +170,6 @@ int main(int argc, char **argv)
 	info.port = 7681;
 
 	pthread_mutex_init(&ws_mutex, NULL);
-
-	while (n >= 0) {
-		n = getopt_long(argc, argv, "eci:hsap:d:Dr:j:", options, NULL);
-		if (n < 0)
-			continue;
-		switch (n) {
-		case 'j':
-			threads = atoi(optarg);
-			if (threads > ARRAY_SIZE(pthread_service)) {
-				lwsl_err("Max threads %lu\n",
-					 (unsigned long)ARRAY_SIZE(pthread_service));
-				return 1;
-			}
-			break;
-		case 'e':
-			opts |= LWS_SERVER_OPTION_LIBEV;
-			break;
-		case 'd':
-			debug_level = atoi(optarg);
-			break;
-		case 's':
-			use_ssl = 1;
-			break;
-		case 'a':
-			opts |= LWS_SERVER_OPTION_ALLOW_NON_SSL_ON_SSL_PORT;
-			break;
-		case 'p':
-			info.port = atoi(optarg);
-			break;
-		case 'i':
-			strncpy(interface_name, optarg, sizeof interface_name);
-			interface_name[(sizeof interface_name) - 1] = '\0';
-			iface = interface_name;
-			break;
-		case 'r':
-			resource_path = optarg;
-			printf("Setting resource path to \"%s\"\n", resource_path);
-			break;
-		case 'h':
-			fprintf(stderr, "Usage: test-server "
-					"[--port=<p>] [--ssl] "
-					"[-d <log bitfield>] "
-					"[--resource_path <path>]\n");
-			exit(1);
-		}
-	}
 
 
 	signal(SIGINT, sighandler);
@@ -242,13 +219,6 @@ int main(int argc, char **argv)
 		return -1;
 	}
 
-	/* start the dumb increment thread */
-
-	n = pthread_create(&pthread_dumb, NULL, thread_dumb_increment, 0);
-	if (n) {
-		lwsl_err("Unable to create dumb thread\n");
-		goto done;
-	}
 
 	/*
 	 * notice the actual number of threads may be capped by the library,
@@ -275,9 +245,6 @@ done:
 
 	lwsl_notice("libwebsockets-test-server exited cleanly\n");
 
-#ifndef _WIN32
-	closelog();
-#endif
 
 	return 0;
 }
