@@ -1,7 +1,8 @@
-#include "config.h"
 #include <stdlib.h> /* For EXIT_* */
 #include <stdio.h> /* For fprintf/sprintf */
 #include <unistd.h> /* For access */
+
+#include "config.h"
 
 int init_config(MAIN_CONFIG *config)
 {
