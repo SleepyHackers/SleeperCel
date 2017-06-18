@@ -1,6 +1,7 @@
 #include "config.h"
-#include <stdlib.h>
-#include <stdio.h>
+#include <stdlib.h> /* For EXIT_* */
+#include <stdio.h> /* For fprintf/sprintf */
+#include <unistd.h> /* For access */
 
 int init_config(MAIN_CONFIG *config)
 {
@@ -9,6 +10,11 @@ int init_config(MAIN_CONFIG *config)
   char *error_report = (char*)malloc(MAX_ERROR_SIZE);
   
   config_init(&cfg);
+
+  if(access(MAIN_CONFIG_FILE, F_OK) == -1) {
+    sprintf(error_report, "Config ERROR: Cannot open '%s'. Please move etc/main.dist.cfg to etc/main.cfg if you have not done so already!\n", MAIN_CONFIG_FILE);
+    goto config_fail;
+  }
 
   if(!config_read_file(&cfg, MAIN_CONFIG_FILE))
   {
